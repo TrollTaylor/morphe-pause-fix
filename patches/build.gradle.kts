@@ -19,6 +19,8 @@ kotlin {
 }
 
 dependencies {
+    // Removed extension dependency
+
     implementation(libs.gson)
 }
 

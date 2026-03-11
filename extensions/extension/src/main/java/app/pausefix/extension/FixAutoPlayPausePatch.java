@@ -89,32 +89,34 @@ public final class FixAutoPlayPausePatch {
     }
 
     /**
-     * Checks whether the current pause call should be blocked.
+     * Filters the playWhenReady boolean parameter.
      *
      * This method is invoked via the smali hook injected at the start of
-     * YouTube's player pause method by the bytecode patch.
+     * YouTube's player setPlayWhenReady-style method by the bytecode patch.
      *
-     * @return {@code true} if the pause should be blocked (within protection window),
-     *         {@code false} if the pause should proceed normally.
+     * If we're in the protection window and the caller is trying to pause
+     * (playWhenReady = false), we override it to true to keep playing.
+     *
+     * @param playWhenReady the original value: true = play, false = pause.
+     * @return the (possibly overridden) value.
      */
-    public static boolean shouldBlockPause() {
-        if (blockPause) {
+    public static boolean filterPlayWhenReady(boolean playWhenReady) {
+        if (!playWhenReady && blockPause) {
             blockedCount++;
 
-            // Safety valve: if we've blocked too many pauses, something else
-            // might be going on — allow pauses through
+            // Safety valve
             if (blockedCount > MAX_BLOCKED_PAUSES) {
                 Log.w(TAG, "Blocked " + MAX_BLOCKED_PAUSES + " pauses — safety limit reached, allowing pause through.");
                 blockPause = false;
                 return false;
             }
 
-            Log.d(TAG, "Blocked auto-pause #" + blockedCount + " (within protection window)");
-            return true;
+            Log.d(TAG, "Blocked auto-pause #" + blockedCount + " (forced playWhenReady=true)");
+            return true; // Override: keep playing
         }
 
-        // Outside protection window — allow normal pause behavior
-        return false;
+        // Outside protection window or already playing — pass through
+        return playWhenReady;
     }
 
     // Prevent instantiation

@@ -17,37 +17,27 @@ import app.morphe.patcher.methodCall
  * since YouTube obfuscates method/class names with each release.
  */
 object PlayerPauseFingerprint : Fingerprint(
-    // The pause method is typically public and declared final in the player class
-    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
-    // Pause method returns void
+    // The play/pause toggle method is typically public
+    accessFlags = listOf(AccessFlags.PUBLIC),
+    // Returns void
     returnType = "V",
-    // No parameters — the simple pause() call
-    parameters = listOf(),
+    // Takes a BOOLEAN parameter — this is the playWhenReady/pause toggle
+    // (true = play, false = pause)
+    parameters = listOf("Z"),
 
-    // Instruction pattern to match the pause method body.
-    // YouTube's pause implementation typically:
-    // 1. Gets the current playback state field
-    // 2. Calls a method to update the state (set to paused)
-    // 3. Calls a method to notify listeners
+    // The method stores the boolean to a field and then invokes handlers
     filters = listOf(
-        // Gets the playback state field (an int or enum)
-        opcode(Opcode.IGET),
-        // Invokes a method to set player state
-        methodCall(
-            name = "set",
-        ),
-        // Invokes a method on a listener/callback interface
-        opcode(Opcode.INVOKE_INTERFACE),
+        opcode(Opcode.IPUT_BOOLEAN),
+        opcode(Opcode.INVOKE_VIRTUAL),
     ),
 
-    // Additional check: the class should have fields related to player state
+    // The class should have multiple boolean fields (player state tracking)
+    // and at least one int field (e.g., playback state enum)
     custom = { method, classDef ->
-        // Match classes that have boolean and int fields (typical for player state tracking)
-        // and the method itself is short (pause methods are usually concise)
-        classDef.fields.any { it.type == "Z" } &&
+        classDef.fields.count { it.type == "Z" } >= 2 &&
             classDef.fields.any { it.type == "I" } &&
             method.implementation != null &&
-            method.implementation!!.registerCount <= 8
+            method.implementation!!.registerCount <= 10
     }
 )
 
@@ -59,24 +49,23 @@ object PlayerPauseFingerprint : Fingerprint(
  * new video (typically called when a video ID changes).
  */
 object PlaybackStartFingerprint : Fingerprint(
-    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
+    accessFlags = listOf(AccessFlags.PUBLIC),
     // Returns void — it's a setup/initialization method
     returnType = "V",
-    // Takes a String parameter (the video ID) and potentially other params
-    parameters = listOf("Ljava/lang/String;"),
+    // We've removed strict parameter types to widen the match
 
+    // Filter based on the initialization sequence
     filters = listOf(
-        // Stores the video ID string
-        opcode(Opcode.IPUT_OBJECT),
-        // Initializes playback state (sets a boolean or int)
-        opcode(Opcode.CONST_4),
-        // Stores the initial state
-        opcode(Opcode.IPUT),
+        opcode(Opcode.INVOKE_VIRTUAL),
+        opcode(Opcode.MOVE_RESULT_OBJECT),
+        opcode(Opcode.INVOKE_VIRTUAL),
     ),
 
     custom = { method, classDef ->
         // The class should have a String field (for video ID storage)
+        // and the method should take at least one object parameter
         classDef.fields.any { it.type == "Ljava/lang/String;" } &&
+            method.parameterTypes.any { it.startsWith("L") } &&
             method.implementation != null
     }
 )

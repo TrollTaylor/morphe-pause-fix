@@ -31,21 +31,18 @@ val fixAutoPlayPausePatch = bytecodePatch(
     compatibleWith("com.google.android.youtube")
 
     // Include the runtime extension code in the patched APK
-    extendWith("extensions/extension.mpp")
+    extendWith("extensions/extension.rve")
 
     execute {
-        // --- Hook 1: Intercept the pause method ---
-        // At the very start of the pause method, check if we should block it.
-        // If shouldBlockPause() returns true, return immediately (skip the pause).
+        // --- Hook 1: Intercept the play/pause toggle ---
+        // The matched method takes a boolean (p1): true = play, false = pause.
+        // We intercept p1 and override it to true (play) if we're in the
+        // protection window, preventing the auto-pause.
         PlayerPauseFingerprint.method.addInstructions(
             0,
             """
-                invoke-static {}, $EXTENSION_CLASS_DESCRIPTOR->shouldBlockPause()Z
-                move-result v0
-                if-eqz v0, :allow_pause
-                return-void
-                :allow_pause
-                nop
+                invoke-static {p1}, $EXTENSION_CLASS_DESCRIPTOR->filterPlayWhenReady(Z)Z
+                move-result p1
             """
         )
 

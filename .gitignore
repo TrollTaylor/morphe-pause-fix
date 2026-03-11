@@ -14,3 +14,9 @@ Thumbs.db
 
 # Local config
 local.properties
+
+# Large/temp files
+*.apk
+*.zip
+*.log
+*.txt
