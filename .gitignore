@@ -18,5 +18,3 @@ local.properties
 # Large/temp files
 *.apk
 *.zip
-*.log
-*.txt
