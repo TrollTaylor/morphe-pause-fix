@@ -4,26 +4,25 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import java.lang.reflect.Method;
+
 /**
  * Runtime extension for the YouTube Auto-Pause Fix patch.
  *
- * This class is injected into the patched YouTube APK and provides the logic
- * to selectively block automatic pause calls that occur during initial video load.
+ * <h2>Strategy: Reflection-based auto-resume</h2>
+ * Instead of trying to intercept the pause method (which is unreliable due
+ * to YouTube's obfuscation), we take the player/controller object from the
+ * playback start hook and use reflection to force-resume playback after
+ * the auto-pause bug fires.
  *
  * <h2>How it works:</h2>
  * <ol>
- *   <li>When a new video starts loading, {@link #onVideoStarted()} is called,
- *       which enables pause-blocking for a short protection window.</li>
- *   <li>During this window, any calls to the player's pause method are intercepted
- *       by {@link #shouldBlockPause()}, which returns {@code true} to skip the pause.</li>
- *   <li>After the protection window expires (default 3 seconds), pauses are allowed
- *       normally — so user-initiated pauses work as expected.</li>
+ *   <li>When a new video starts loading, {@link #onVideoStarted(Object)} is called
+ *       with a reference to the player/controller object.</li>
+ *   <li>We schedule multiple resume attempts over the next few seconds.</li>
+ *   <li>Each attempt tries to call play-related methods via reflection
+ *       (setPlayWhenReady, play, etc.) to override the auto-pause.</li>
  * </ol>
- *
- * <h2>Why this works:</h2>
- * The YouTube auto-pause bug fires pause calls within the first 1-2 seconds of
- * video load when the user is logged in. By blocking pauses only during this narrow
- * window, we prevent the bug without interfering with normal playback controls.
  */
 @SuppressWarnings("unused")
 public final class FixAutoPlayPausePatch {
@@ -31,92 +30,196 @@ public final class FixAutoPlayPausePatch {
     private static final String TAG = "PauseFix";
 
     /**
-     * Duration in milliseconds to block automatic pause calls after a video starts.
-     * The bug typically fires within the first 1-2 seconds, so 3 seconds provides
-     * comfortable headroom.
+     * How many times to attempt auto-resume after a video starts.
      */
-    private static final long PROTECTION_WINDOW_MS = 3000L;
+    private static final int RESUME_ATTEMPTS = 6;
 
     /**
-     * Maximum number of pause calls to block per protection window.
-     * This acts as a safety valve — if something is genuinely trying to pause
-     * (e.g., the user tapping pause very quickly), we don't want to block forever.
+     * Delay between resume attempts in milliseconds.
      */
-    private static final int MAX_BLOCKED_PAUSES = 10;
+    private static final long RESUME_INTERVAL_MS = 500L;
 
     /**
-     * Whether pause calls should currently be blocked.
-     * Set to {@code true} when a video starts loading, reset after the protection window.
-     */
-    private static volatile boolean blockPause = false;
-
-    /**
-     * Counter for how many pause calls have been blocked in the current window.
-     */
-    private static volatile int blockedCount = 0;
-
-    /**
-     * Handler for scheduling the protection window timeout on the main thread.
+     * Handler for scheduling resume attempts on the main thread.
      */
     private static final Handler handler = new Handler(Looper.getMainLooper());
 
     /**
-     * Runnable that disables pause blocking after the protection window expires.
+     * Tracks whether we're currently in a resume cycle.
      */
-    private static final Runnable disableRunnable = () -> {
-        blockPause = false;
-        Log.d(TAG, "Protection window expired. Blocked " + blockedCount + " pause(s). Normal pause behavior restored.");
-        blockedCount = 0;
-    };
+    private static volatile boolean resuming = false;
 
     /**
      * Called when a new video starts loading.
-     * Enables the pause-blocking protection window.
+     * Receives the player/controller object from the bytecode hook.
      *
      * This method is invoked via the smali hook injected into YouTube's
      * playback initialization method by the bytecode patch.
+     *
+     * @param playerObject the 'this' reference from the hooked method
      */
-    public static void onVideoStarted() {
-        Log.d(TAG, "Video started loading — enabling pause protection for " + PROTECTION_WINDOW_MS + "ms");
+    public static void onVideoStarted(Object playerObject) {
+        Log.d(TAG, "Video started — player class: " + playerObject.getClass().getName());
 
-        // Reset state
-        blockedCount = 0;
-        blockPause = true;
+        // Cancel any previous resume cycle
+        handler.removeCallbacksAndMessages(TAG);
+        resuming = true;
 
-        // Cancel any previous pending timeout and schedule a new one
-        handler.removeCallbacks(disableRunnable);
-        handler.postDelayed(disableRunnable, PROTECTION_WINDOW_MS);
+        // Log available methods for debugging (only first time)
+        logPlayerMethods(playerObject);
+
+        // Schedule multiple resume attempts
+        for (int i = 0; i < RESUME_ATTEMPTS; i++) {
+            final int attempt = i + 1;
+            handler.postDelayed(() -> {
+                if (!resuming) return;
+                tryForceResume(playerObject, attempt);
+            }, RESUME_INTERVAL_MS * (i + 1));
+        }
+
+        // After all attempts, stop the resume cycle
+        handler.postDelayed(() -> {
+            resuming = false;
+            Log.d(TAG, "Resume cycle complete.");
+        }, RESUME_INTERVAL_MS * (RESUME_ATTEMPTS + 1));
     }
 
     /**
-     * Filters the playWhenReady boolean parameter.
-     *
-     * This method is invoked via the smali hook injected at the start of
-     * YouTube's player setPlayWhenReady-style method by the bytecode patch.
-     *
-     * If we're in the protection window and the caller is trying to pause
-     * (playWhenReady = false), we override it to true to keep playing.
-     *
-     * @param playWhenReady the original value: true = play, false = pause.
-     * @return the (possibly overridden) value.
+     * Try to force-resume playback using reflection.
+     * Attempts multiple known method names that control playback.
      */
-    public static boolean filterPlayWhenReady(boolean playWhenReady) {
-        if (!playWhenReady && blockPause) {
-            blockedCount++;
+    private static void tryForceResume(Object playerObject, int attempt) {
+        Log.d(TAG, "Resume attempt #" + attempt + " on " + playerObject.getClass().getSimpleName());
 
-            // Safety valve
-            if (blockedCount > MAX_BLOCKED_PAUSES) {
-                Log.w(TAG, "Blocked " + MAX_BLOCKED_PAUSES + " pauses — safety limit reached, allowing pause through.");
-                blockPause = false;
-                return false;
-            }
+        // Try known ExoPlayer/YouTube player method names
+        // These methods may or may not exist depending on obfuscation
+        boolean success = false;
 
-            Log.d(TAG, "Blocked auto-pause #" + blockedCount + " (forced playWhenReady=true)");
-            return true; // Override: keep playing
+        // Strategy 1: Try setPlayWhenReady(true)
+        success = tryCallMethod(playerObject, "setPlayWhenReady", new Class[]{boolean.class}, true);
+        if (success) {
+            Log.d(TAG, "  ✓ setPlayWhenReady(true) succeeded!");
+            return;
         }
 
-        // Outside protection window or already playing — pass through
-        return playWhenReady;
+        // Strategy 2: Try play()
+        success = tryCallMethod(playerObject, "play", new Class[]{}, (Object[]) null);
+        if (success) {
+            Log.d(TAG, "  ✓ play() succeeded!");
+            return;
+        }
+
+        // Strategy 3: Scan for void methods with a single boolean parameter
+        // and try calling them with true (play = true, pause = false pattern)
+        try {
+            for (Method m : playerObject.getClass().getDeclaredMethods()) {
+                Class<?>[] params = m.getParameterTypes();
+                if (params.length == 1 && params[0] == boolean.class
+                        && m.getReturnType() == void.class) {
+                    try {
+                        m.setAccessible(true);
+                        m.invoke(playerObject, true);
+                        Log.d(TAG, "  ✓ Called " + m.getName() + "(true) via scan");
+                        // Don't return — we want to try all boolean methods
+                        // since we don't know which one is the play toggle
+                    } catch (Exception e) {
+                        // Ignore — method might not be the right one
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "  Method scan failed: " + e.getMessage());
+        }
+
+        // Strategy 4: Try on superclass methods too
+        try {
+            Class<?> superClass = playerObject.getClass().getSuperclass();
+            if (superClass != null && superClass != Object.class) {
+                success = tryCallMethodOnClass(playerObject, superClass, "setPlayWhenReady",
+                        new Class[]{boolean.class}, true);
+                if (success) {
+                    Log.d(TAG, "  ✓ super.setPlayWhenReady(true) succeeded!");
+                    return;
+                }
+                success = tryCallMethodOnClass(playerObject, superClass, "play",
+                        new Class[]{}, (Object[]) null);
+                if (success) {
+                    Log.d(TAG, "  ✓ super.play() succeeded!");
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            // Ignore
+        }
+    }
+
+    /**
+     * Log available methods on the player object for debugging.
+     */
+    private static boolean logged = false;
+    private static void logPlayerMethods(Object playerObject) {
+        if (logged) return;
+        logged = true;
+
+        try {
+            Log.d(TAG, "Player class: " + playerObject.getClass().getName());
+            Log.d(TAG, "Superclass: " + playerObject.getClass().getSuperclass());
+
+            // Log methods that take a boolean parameter or have play-related names
+            for (Method m : playerObject.getClass().getDeclaredMethods()) {
+                Class<?>[] params = m.getParameterTypes();
+                String paramStr = "";
+                for (Class<?> p : params) {
+                    paramStr += p.getSimpleName() + ", ";
+                }
+                if (params.length <= 2) {
+                    Log.d(TAG, "  Method: " + m.getName() + "(" + paramStr + ") -> " + m.getReturnType().getSimpleName());
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to log methods: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Try to call a method by name on the given object.
+     */
+    private static boolean tryCallMethod(Object obj, String methodName, Class<?>[] paramTypes, Object... args) {
+        return tryCallMethodOnClass(obj, obj.getClass(), methodName, paramTypes, args);
+    }
+
+    /**
+     * Try to call a method by name using a specific class definition.
+     */
+    private static boolean tryCallMethodOnClass(Object obj, Class<?> clazz, String methodName,
+                                                 Class<?>[] paramTypes, Object... args) {
+        try {
+            Method method = clazz.getDeclaredMethod(methodName, paramTypes);
+            method.setAccessible(true);
+            if (args != null) {
+                method.invoke(obj, args);
+            } else {
+                method.invoke(obj);
+            }
+            return true;
+        } catch (NoSuchMethodException e) {
+            // Method doesn't exist, try getMethod (includes inherited)
+            try {
+                Method method = clazz.getMethod(methodName, paramTypes);
+                method.setAccessible(true);
+                if (args != null) {
+                    method.invoke(obj, args);
+                } else {
+                    method.invoke(obj);
+                }
+                return true;
+            } catch (Exception e2) {
+                return false;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "  Failed to call " + methodName + ": " + e.getMessage());
+            return false;
+        }
     }
 
     // Prevent instantiation
