@@ -27,12 +27,18 @@ object PlaybackStartFingerprint : Fingerprint(
     ),
 
     custom = { method, classDef ->
-        // The class must NOT be a drawable (common false positive)
+        // 1. Must NOT be an android system class or drawable (prevents FrameSequenceDrawable hook)
+        !classDef.type.startsWith("Landroid/") && 
+        !classDef.type.startsWith("Landroidx/") &&
         !classDef.type.contains("Drawable") &&
-            // The class should contain fields related to YouTube player models
-            classDef.fields.any { it.type.contains("player") || it.type.contains("innertube") } &&
-            // The method should take at least one object parameter
-            method.parameterTypes.any { it.startsWith("L") } &&
-            method.implementation != null
+        
+        // 2. Must contain fields related to YouTube player logic (descriptors, models, etc.)
+        classDef.fields.any { f -> 
+            f.type.contains("player") || f.type.contains("Descriptor") || f.type.contains("Response") || f.type.contains("innertube")
+        } &&
+        
+        // 3. Method must take at least one object (usually the PlaybackStartDescriptor)
+        method.parameterTypes.any { it.startsWith("L") } &&
+        method.implementation != null
     }
 )
