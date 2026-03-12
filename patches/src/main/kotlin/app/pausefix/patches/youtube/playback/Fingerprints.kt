@@ -19,7 +19,7 @@ object PlaybackStartFingerprint : Fingerprint(
     // Returns void — it's a setup/initialization method
     returnType = "V",
 
-    // Filter based on the initialization sequence: INVOKE_VIRTUAL, INVOKE_VIRTUAL
+    // Filter based on typical opcode sequence in playback start logic
     filters = listOf(
         opcode(Opcode.INVOKE_VIRTUAL),
         opcode(Opcode.INVOKE_VIRTUAL),
@@ -31,9 +31,16 @@ object PlaybackStartFingerprint : Fingerprint(
         !classDef.type.startsWith("Landroidx/") &&
         !classDef.type.contains("Drawable") &&
         
-        // 2. The method must take a PlaybackStartDescriptor as a parameter
-        // This is the "gold standard" for identifying this specific playback start method.
-        method.parameterTypes.any { it.contains("PlaybackStartDescriptor") } &&
-        method.implementation != null
+        // 2. Look for stable identifiers used by ReVanced for v20.x
+        // - Literal: 45665455 (common feature flag)
+        // - String: "play() called when the player wasn't loaded."
+        val instructions = method.implementation?.instructions?.map { it.toString() } ?: emptyList()
+        val hasStableLiteral = instructions.any { it.contains("45665455") } || 
+                               instructions.any { it.contains("play() called when the player wasn't loaded") }
+        
+        // 3. Fallback: Check for PlaybackStartDescriptor if not fully obfuscated
+        val hasDescriptorParam = method.parameterTypes.any { it.contains("PlaybackStartDescriptor") }
+
+        (hasStableLiteral || hasDescriptorParam) && method.implementation != null
     }
 )
