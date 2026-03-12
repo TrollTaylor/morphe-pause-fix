@@ -94,68 +94,54 @@ public final class FixAutoPlayPausePatch {
     private static void tryForceResume(Object playerObject, int attempt) {
         Log.d(TAG, "Resume attempt #" + attempt + " on " + playerObject.getClass().getSimpleName());
 
-        // Try known ExoPlayer/YouTube player method names
-        // These methods may or may not exist depending on obfuscation
-        boolean success = false;
+        // Try known method names first (fast path)
+        if (tryCallPlaybackMethod(playerObject, "setPlayWhenReady", new Class[]{boolean.class}, true)) return;
+        if (tryCallPlaybackMethod(playerObject, "play", new Class[]{}, (Object[]) null)) return;
+        if (tryCallPlaybackMethod(playerObject, "start", new Class[]{}, (Object[]) null)) return;
+        if (tryCallPlaybackMethod(playerObject, "resume", new Class[]{}, (Object[]) null)) return;
 
-        // Strategy 1: Try setPlayWhenReady(true)
-        success = tryCallMethod(playerObject, "setPlayWhenReady", new Class[]{boolean.class}, true);
-        if (success) {
-            Log.d(TAG, "  ✓ setPlayWhenReady(true) succeeded!");
-            showToast("Pause Fix: Auto-Resumed!");
-            return;
-        }
+        // Exhaustive scan across the entire class hierarchy
+        showToast("Pause Fix: Scanning for play method...");
+        Class<?> current = playerObject.getClass();
+        while (current != null && current != Object.class) {
+            // Try known names on this specific class level
+            if (tryCallMethodOnClass(playerObject, current, "setPlayWhenReady", new Class[]{boolean.class}, true)) return;
+            if (tryCallMethodOnClass(playerObject, current, "play", new Class[]{}, (Object[]) null)) return;
 
-        // Strategy 2: Try play()
-        success = tryCallMethod(playerObject, "play", new Class[]{}, (Object[]) null);
-        if (success) {
-            Log.d(TAG, "  ✓ play() succeeded!");
-            showToast("Pause Fix: Auto-Resumed!");
-            return;
-        }
-
-        // Strategy 3: Scan for void methods with a single boolean parameter
-        // and try calling them with true (play = true, pause = false pattern)
-        try {
-            for (Method m : playerObject.getClass().getDeclaredMethods()) {
-                Class<?>[] params = m.getParameterTypes();
-                if (params.length == 1 && params[0] == boolean.class
-                        && m.getReturnType() == void.class) {
-                    try {
-                        m.setAccessible(true);
-                        m.invoke(playerObject, true);
-                        Log.d(TAG, "  ✓ Called " + m.getName() + "(true) via scan");
-                        // Don't return — we want to try all boolean methods
-                        // since we don't know which one is the play toggle
-                    } catch (Exception e) {
-                        // Ignore — method might not be the right one
+            // Scan all methods on this class level
+            for (Method m : current.getDeclaredMethods()) {
+                try {
+                    Class<?>[] params = m.getParameterTypes();
+                    if (m.getReturnType() == void.class) {
+                        // 1. Try any void method with single boolean param (force true)
+                        if (params.length == 1 && params[0] == boolean.class) {
+                            m.setAccessible(true);
+                            m.invoke(playerObject, true);
+                            Log.d(TAG, "  ✓ Triggered " + m.getName() + "(true) on " + current.getSimpleName());
+                        }
+                        // 2. Try any zero-param void method with play-sounding name
+                        else if (params.length == 0) {
+                            String name = m.getName().toLowerCase();
+                            if (name.contains("play") || name.contains("resume") || name.contains("start")) {
+                                m.setAccessible(true);
+                                m.invoke(playerObject);
+                                Log.d(TAG, "  ✓ Triggered " + m.getName() + "() on " + current.getSimpleName());
+                            }
+                        }
                     }
-                }
+                } catch (Exception ignored) {}
             }
-        } catch (Exception e) {
-            Log.w(TAG, "  Method scan failed: " + e.getMessage());
+            current = current.getSuperclass();
         }
+    }
 
-        // Strategy 4: Try on superclass methods too
-        try {
-            Class<?> superClass = playerObject.getClass().getSuperclass();
-            if (superClass != null && superClass != Object.class) {
-                success = tryCallMethodOnClass(playerObject, superClass, "setPlayWhenReady",
-                        new Class[]{boolean.class}, true);
-                if (success) {
-                    Log.d(TAG, "  ✓ super.setPlayWhenReady(true) succeeded!");
-                    return;
-                }
-                success = tryCallMethodOnClass(playerObject, superClass, "play",
-                        new Class[]{}, (Object[]) null);
-                if (success) {
-                    Log.d(TAG, "  ✓ super.play() succeeded!");
-                    return;
-                }
-            }
-        } catch (Exception e) {
-            // Ignore
+    private static boolean tryCallPlaybackMethod(Object obj, String name, Class<?>[] types, Object... args) {
+        if (tryCallMethod(obj, name, types, args)) {
+            Log.d(TAG, "  ✓ " + name + " succeeded!");
+            showToast("Pause Fix: Auto-Resumed!");
+            return true;
         }
+        return false;
     }
 
     /**
