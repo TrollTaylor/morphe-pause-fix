@@ -1,5 +1,5 @@
 {
-  "version": "1.0.33",
+  "version": "1.0.36",
   "patches": [
     {
       "name": "Fix Auto-Play Pause",
