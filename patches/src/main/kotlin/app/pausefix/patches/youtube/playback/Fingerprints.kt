@@ -15,16 +15,23 @@ import app.morphe.patcher.opcode
  * YouTube's bug auto-pauses it.
  */
 object PlaybackStartFingerprint : Fingerprint(
-    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
-    returnType = "V",
-    strings = listOf("play() called when the player wasn't loaded."),
-    literals = listOf(45665455L),
+    accessFlags = listOf(AccessFlags.PUBLIC),
     custom = { method, classDef ->
-        // 1. Safety exclusions
-        !classDef.type.contains("Drawable") && 
-        !classDef.type.startsWith("Landroid/") &&
+        // Use custom logic to check for landmarks, as constructor properties 
+        // like 'strings' or 'literals' may cause compilation errors if not supported.
+        val instructions = method.implementation?.instructions?.map { it.toString() } ?: emptyList()
         
-        // 2. Ensure it's not an interface or abstract method
+        // Landmarks for playback start in YouTube 20.x (found in ReVanced)
+        val hasPlayLog = instructions.any { it.contains("play() called when the player wasn't loaded.") }
+        val hasApiPlayerStateLiteral = instructions.any { it.contains("45665455") }
+        
+        // Basic method signature check
+        val isVoid = method.returnType == "V"
+        
+        // Match if any landmark is found, but safely exclude system classes/drawables
+        (hasPlayLog || hasApiPlayerStateLiteral) && isVoid &&
+        !classDef.type.contains("Drawable") && 
+        !classDef.type.startsWith("Landroid/") && 
         method.implementation != null
     }
 )
