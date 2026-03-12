@@ -27,9 +27,11 @@ object PlaybackStartFingerprint : Fingerprint(
     ),
 
     custom = { method, classDef ->
-        // The class should have a String field (for video ID storage)
-        // and the method should take at least one object parameter
-        classDef.fields.any { it.type == "Ljava/lang/String;" } &&
+        // The class must NOT be a drawable (common false positive)
+        !classDef.type.contains("Drawable") &&
+            // The class should contain fields related to YouTube player models
+            classDef.fields.any { it.type.contains("player") || it.type.contains("innertube") } &&
+            // The method should take at least one object parameter
             method.parameterTypes.any { it.startsWith("L") } &&
             method.implementation != null
     }
