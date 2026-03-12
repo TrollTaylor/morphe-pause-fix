@@ -1,3 +1,5 @@
+val runNumber = System.getenv("GITHUB_RUN_NUMBER") ?: "local"
+version = "1.0.$runNumber"
 group = "app.pausefix"
 
 patches {

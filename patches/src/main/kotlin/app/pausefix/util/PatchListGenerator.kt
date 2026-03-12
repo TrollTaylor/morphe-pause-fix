@@ -86,7 +86,7 @@ private fun generatePatchList(version: String, patches: Set<Patch<*>>) {
     val runNumber = System.getenv("GITHUB_RUN_NUMBER") ?: "0"
     val repo = System.getenv("GITHUB_REPOSITORY") ?: "TrollTaylor/morphe-pause-fix"
     bundleObject.addProperty("source", "https://github.com/$repo")
-    val tagName = "v1.0.$runNumber"
+    val tagName = if (runNumber == "0") "local" else "v1.0.$runNumber"
     val mppFileName = File("build/libs/").listFiles { file -> 
         file.name.endsWith(".mpp") && !file.name.contains("sources") && !file.name.contains("javadoc")
     }?.firstOrNull()?.name ?: "patches.mpp"
