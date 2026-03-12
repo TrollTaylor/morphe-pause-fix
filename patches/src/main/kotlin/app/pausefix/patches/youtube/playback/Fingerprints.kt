@@ -16,23 +16,18 @@ import app.morphe.patcher.opcode
  */
 object PlaybackStartFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC),
-    // Use stable landmarks from ReVanced Extended (Volume string, PSPS, etc.)
-    // These are highly specific to the video player engine.
+    returnType = "V",
+    strings = listOf(
+        "Volume: %f",
+        "psps",
+        "play() called when the player wasn't loaded"
+    ),
     custom = { method, classDef ->
         // 1. Safety exclusions
         !classDef.type.contains("Drawable") && 
         !classDef.type.startsWith("Landroid/") &&
         
-        // 2. Look for stable identifiers used by ReVanced/Extended
-        val instructions = method.implementation?.instructions?.map { it.toString() } ?: emptyList()
-        
-        val hasVolumeLandmark = instructions.any { it.contains("Volume: %f") }
-        val hasPspsLandmark = instructions.any { it.contains("psps") }
-        val hasLegacyLandmark = instructions.any { it.contains("play() called when the player wasn't loaded") }
-        
-        // 3. Check for specific parameter or return type if common
-        val isVoid = method.returnType == "V"
-        
-        (hasVolumeLandmark || hasPspsLandmark || hasLegacyLandmark) && isVoid && method.implementation != null
+        // 2. Ensure it's not an interface or abstract method
+        method.implementation != null
     }
 )

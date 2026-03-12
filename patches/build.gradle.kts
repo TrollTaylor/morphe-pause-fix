@@ -16,32 +16,22 @@ patches {
 
 kotlin {
     compilerOptions {
-        freeCompilerArgs.add("-Xcontext-parameters")
+        freeCompilerArgs.addAll("-Xcontext-receivers", "-Xcontext-parameters")
     }
 }
 
 dependencies {
-    // Removed extension dependency
-
     implementation(libs.gson)
 }
 
 tasks {
     register<JavaExec>("generatePatchesList") {
         description = "Build patch with patch list"
-
         dependsOn(build)
-
         classpath = sourceSets["main"].runtimeClasspath
         mainClass.set("app.pausefix.util.PatchListGeneratorKt")
     }
     publish {
         dependsOn("generatePatchesList")
-    }
-}
-
-kotlin {
-    compilerOptions {
-        freeCompilerArgs = listOf("-Xcontext-receivers")
     }
 }
