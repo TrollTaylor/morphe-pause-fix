@@ -16,31 +16,23 @@ import app.morphe.patcher.opcode
  */
 object PlaybackStartFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC),
-    // Returns void — it's a setup/initialization method
-    returnType = "V",
-
-    // Filter based on typical opcode sequence in playback start logic
-    filters = listOf(
-        opcode(Opcode.INVOKE_VIRTUAL),
-        opcode(Opcode.INVOKE_VIRTUAL),
-    ),
-
+    // Use stable landmarks from ReVanced Extended (Volume string, PSPS, etc.)
+    // These are highly specific to the video player engine.
     custom = { method, classDef ->
-        // 1. Must NOT be an android system class or drawable (prevents FrameSequenceDrawable hook)
-        !classDef.type.startsWith("Landroid/") && 
-        !classDef.type.startsWith("Landroidx/") &&
-        !classDef.type.contains("Drawable") &&
+        // 1. Safety exclusions
+        !classDef.type.contains("Drawable") && 
+        !classDef.type.startsWith("Landroid/") &&
         
-        // 2. Look for stable identifiers used by ReVanced for v20.x
-        // - Literal: 45665455 (common feature flag)
-        // - String: "play() called when the player wasn't loaded."
+        // 2. Look for stable identifiers used by ReVanced/Extended
         val instructions = method.implementation?.instructions?.map { it.toString() } ?: emptyList()
-        val hasStableLiteral = instructions.any { it.contains("45665455") } || 
-                               instructions.any { it.contains("play() called when the player wasn't loaded") }
         
-        // 3. Fallback: Check for PlaybackStartDescriptor if not fully obfuscated
-        val hasDescriptorParam = method.parameterTypes.any { it.contains("PlaybackStartDescriptor") }
-
-        (hasStableLiteral || hasDescriptorParam) && method.implementation != null
+        val hasVolumeLandmark = instructions.any { it.contains("Volume: %f") }
+        val hasPspsLandmark = instructions.any { it.contains("psps") }
+        val hasLegacyLandmark = instructions.any { it.contains("play() called when the player wasn't loaded") }
+        
+        // 3. Check for specific parameter or return type if common
+        val isVoid = method.returnType == "V"
+        
+        (hasVolumeLandmark || hasPspsLandmark || hasLegacyLandmark) && isVoid && method.implementation != null
     }
 )
