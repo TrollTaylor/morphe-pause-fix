@@ -15,13 +15,10 @@ import app.morphe.patcher.opcode
  * YouTube's bug auto-pauses it.
  */
 object PlaybackStartFingerprint : Fingerprint(
-    accessFlags = listOf(AccessFlags.PUBLIC),
+    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
     returnType = "V",
-    strings = listOf(
-        "Volume: %f",
-        "psps",
-        "play() called when the player wasn't loaded"
-    ),
+    strings = listOf("play() called when the player wasn't loaded."),
+    literals = listOf(45665455L),
     custom = { method, classDef ->
         // 1. Safety exclusions
         !classDef.type.contains("Drawable") && 
