@@ -19,10 +19,9 @@ object PlaybackStartFingerprint : Fingerprint(
     // Returns void — it's a setup/initialization method
     returnType = "V",
 
-    // Filter based on the initialization sequence
+    // Filter based on the initialization sequence: INVOKE_VIRTUAL, INVOKE_VIRTUAL
     filters = listOf(
         opcode(Opcode.INVOKE_VIRTUAL),
-        opcode(Opcode.MOVE_RESULT_OBJECT),
         opcode(Opcode.INVOKE_VIRTUAL),
     ),
 
@@ -32,13 +31,9 @@ object PlaybackStartFingerprint : Fingerprint(
         !classDef.type.startsWith("Landroidx/") &&
         !classDef.type.contains("Drawable") &&
         
-        // 2. Must contain fields related to YouTube player logic (descriptors, models, etc.)
-        classDef.fields.any { f -> 
-            f.type.contains("player") || f.type.contains("Descriptor") || f.type.contains("Response") || f.type.contains("innertube")
-        } &&
-        
-        // 3. Method must take at least one object (usually the PlaybackStartDescriptor)
-        method.parameterTypes.any { it.startsWith("L") } &&
+        // 2. The method must take a PlaybackStartDescriptor as a parameter
+        // This is the "gold standard" for identifying this specific playback start method.
+        method.parameterTypes.any { it.contains("PlaybackStartDescriptor") } &&
         method.implementation != null
     }
 )
