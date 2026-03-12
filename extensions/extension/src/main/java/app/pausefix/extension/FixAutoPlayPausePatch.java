@@ -1,8 +1,10 @@
 package app.pausefix.extension;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 
 import java.lang.reflect.Method;
 
@@ -60,6 +62,7 @@ public final class FixAutoPlayPausePatch {
      */
     public static void onVideoStarted(Object playerObject) {
         Log.d(TAG, "Video started — player class: " + playerObject.getClass().getName());
+        showToast("Pause Fix: Monitoring...");
 
         // Cancel any previous resume cycle
         handler.removeCallbacksAndMessages(TAG);
@@ -99,6 +102,7 @@ public final class FixAutoPlayPausePatch {
         success = tryCallMethod(playerObject, "setPlayWhenReady", new Class[]{boolean.class}, true);
         if (success) {
             Log.d(TAG, "  ✓ setPlayWhenReady(true) succeeded!");
+            showToast("Pause Fix: Auto-Resumed!");
             return;
         }
 
@@ -106,6 +110,7 @@ public final class FixAutoPlayPausePatch {
         success = tryCallMethod(playerObject, "play", new Class[]{}, (Object[]) null);
         if (success) {
             Log.d(TAG, "  ✓ play() succeeded!");
+            showToast("Pause Fix: Auto-Resumed!");
             return;
         }
 
@@ -220,6 +225,25 @@ public final class FixAutoPlayPausePatch {
             Log.w(TAG, "  Failed to call " + methodName + ": " + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Show a toast message on the screen for debugging.
+     */
+    private static void showToast(final String message) {
+        handler.post(() -> {
+            try {
+                // Get application context via reflection
+                Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+                Method currentApplicationMethod = activityThreadClass.getDeclaredMethod("currentApplication");
+                Context context = (Context) currentApplicationMethod.invoke(null);
+                if (context != null) {
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to show toast: " + e.getMessage());
+            }
+        });
     }
 
     // Prevent instantiation
