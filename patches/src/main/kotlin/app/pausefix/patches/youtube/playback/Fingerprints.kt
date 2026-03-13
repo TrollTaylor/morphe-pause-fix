@@ -15,23 +15,24 @@ import app.morphe.patcher.opcode
  * YouTube's bug auto-pauses it.
  */
 object PlaybackStartFingerprint : Fingerprint(
-    accessFlags = listOf(AccessFlags.PUBLIC),
+    // Match any public void method that acts as a landmark
     custom = { method, classDef ->
-        // Use custom logic to check for landmarks, as constructor properties 
-        // like 'strings' or 'literals' may cause compilation errors if not supported.
         val instructions = method.implementation?.instructions?.map { it.toString() } ?: emptyList()
         
-        // Landmarks for playback start in YouTube 20.x (found in ReVanced)
-        val hasPlayLog = instructions.any { it.contains("play() called when the player wasn't loaded.") }
-        val hasApiPlayerStateLiteral = instructions.any { it.contains("45665455") }
+        // aggregate ALL known landmarks for the playback engine
+        val hasLandmark = instructions.any { 
+            it.contains("play() called when the player wasn't loaded.") || 
+            it.contains("play() blocked because Background Playability failed") ||
+            it.contains("Volume: %f") ||
+            it.contains("psps") ||
+            it.contains("45665455") || // apiPlayerState
+            it.contains("45380134")    // videoId feature flag
+        }
         
-        // Basic method signature check
-        val isVoid = method.returnType == "V"
-        
-        // Match if any landmark is found, but safely exclude system classes/drawables
-        (hasPlayLog || hasApiPlayerStateLiteral) && isVoid &&
+        // Safety: Must be a method with implementation in a YouTube (non-android) class
+        method.implementation != null && 
         !classDef.type.contains("Drawable") && 
-        !classDef.type.startsWith("Landroid/") && 
-        method.implementation != null
+        !classDef.type.startsWith("Landroid/") &&
+        !classDef.type.startsWith("Landroidx/")
     }
 )

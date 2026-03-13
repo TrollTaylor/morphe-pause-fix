@@ -62,7 +62,7 @@ public final class FixAutoPlayPausePatch {
      */
     public static void onVideoStarted(Object playerObject) {
         Log.d(TAG, "Video started — player class: " + playerObject.getClass().getName());
-        showToast("Pause Fix: Monitoring...");
+        showToast("Pause Fix [v1.0.107]: Monitoring...");
 
         // Cancel any previous resume cycle
         handler.removeCallbacksAndMessages(TAG);
